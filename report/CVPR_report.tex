@@ -1,0 +1,149 @@
+% Single-file report (CVPR style skeleton) populated from the provided notebook
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage{times}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{enumitem}
+
+\title{Deep Learning for Blood-Cell Classification: Implementation and Reproducible Experiments}
+\author{[Student Name] \\
+Institution \\
+\texttt{email@domain.edu}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe a reproducible implementation and experimental setup for classifying microscopic blood-cell images into eight classes. The implementation (provided as a Jupyter notebook) contains preprocessing, two implemented networks (a small ResNet-like model named TinyResNet and a DenseNet-121 reimplementation), training recipes, and evaluation code. This report summarizes dataset handling, model architectures, training hyperparameters, evaluation protocol, and instructions to produce the submission file \texttt{prediction\_labels.json} required by the assignment.
+\end{abstract}
+
+% Short checklist required by the assignment
+\paragraph{Checklist}
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item Use only the provided dataset; no pre-trained weights were used.
+    \item Keep the main text within 6 pages (references excluded) when finalising.
+    \item Include at least two baselines and an ablation study in Experiments (placeholders below).
+\end{itemize}
+
+\section{Introduction}
+Microscopic blood-cell classification is an important task for automated hematology analysis. The objective is to assign each input image to one of eight classes (Basophil, Eosinophil, Erythroblast, Immature Granulocyte, Lymphocyte, Monocyte, Neutrophil, Platelet) using only the provided training images. Our code and experiments were implemented in PyTorch and are contained in the supplied Jupyter notebook.
+
+\section{Dataset and Preprocessing}
+The dataset is organized in a folder-based layout. The notebook reads images from \texttt{train/} where subfolders correspond to class names. A JSON file \texttt{class\_map.json} is used to map folder names to integer class IDs.
+
+Preprocessing and data augmentation used in experiments (exact code taken from the notebook):
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item Training transforms: RandomResizedCrop(224), RandomHorizontalFlip(p=0.5), ToTensor().
+    \item Validation / Test transforms: Resize(256), ToTensor().
+    \item Train/validation split: random shuffle then 80\% training, 20\% validation (seeded with random\_state=42).
+    \item Data loading: batch size 32, DataLoader with shuffle for training and num\_workers=0 in the notebook environment.
+\end{itemize}
+
+The notebook also includes a small utility to detect corrupt or all-black/all-white images and a visualization cell that displays 4 example images per class.
+
+\section{Models}
+We implemented and compared two models directly in the notebook (from-scratch implementations):
+
+\subsection{TinyResNet (baseline)}
+TinyResNet is a small ResNet-like architecture implemented using residual BasicBlock units. The notebook defines BasicBlock (two 3x3 convolutions with batch norm and a possible 1x1 shortcut) and stacks three blocks with increasing channels (3→32→64→128), followed by an adaptive average pool and a linear classifier. This model is fast to train and used as a lightweight baseline.
+
+\subsection{DenseNet-121 (main proposed)}
+The notebook contains a from-scratch DenseNet implementation. The provided \texttt{densenet121()} factory builds a DenseNet with block configuration [6,12,24,16], growth rate 32 and a final linear layer for 8 classes. Transition layers perform compression between dense blocks. This is the primary model used for the higher-capacity experiments.
+
+Implementation notes: both models are implemented in plain PyTorch modules (no pre-trained weights or external model zoos were used in accordance with assignment rules).
+
+\section{Training Protocol}
+All training and validation logic comes directly from the notebook. Key hyperparameters and choices:
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item Loss: CrossEntropyLoss.
+    \item Optimizer: Adam with learning rate $1\times10^{-4}$.
+    \item Epochs: 50 (noting this may be reduced for debugging or quick experiments).
+    \item Batch size: 32.
+    \item Device: CUDA when available (the notebook calls \texttt{device="cuda"}).
+    \item Model checkpointing: the training loop saves the best model weights to \texttt{best\_densenet121.pth} when validation accuracy improves.
+\end{itemize}
+
+Training loop details: each epoch runs a training phase (model.train()) accumulating loss and accuracy, followed by a validation phase (model.eval() inside torch.no\_grad()). Training and validation accuracies are printed per epoch. The notebook uses \texttt{tqdm} for progress bars.
+
+\section{Evaluation and Submission}
+The notebook provides a \texttt{test\_unknown\_images(model, test\_directory, transform, device)} helper which runs a forward pass over images in the \texttt{test/} folder and returns a list of predicted class IDs. To produce the required submission file \texttt{prediction\_labels.json}, map each test image filename to its predicted integer label. Example Python code (adapted from the notebook):
+
+\begin{verbatim}
+preds = {}
+image_files = sorted(os.listdir("test"))
+model.load_state_dict(torch.load("best_densenet121.pth"))
+model.eval()
+with torch.no_grad():
+    for fname in image_files:
+        img = Image.open(os.path.join("test", fname)).convert("RGB")
+        inp = val_transforms(img).unsqueeze(0).to(device)
+        out = model(inp)
+        _, p = out.max(1)
+        preds[fname] = int(p.item())
+
+with open("prediction_labels.json", "w") as f:
+    json.dump(preds, f)
+\end{verbatim}
+
+Notes:
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item The submission must be a JSON mapping filename to integer class ID and named exactly \texttt{prediction\_labels.json}.
+    \item The assignment allows at most three submissions to the GradeScope evaluation; keep track of versions.
+    \item Do not edit or relabel \texttt{test/} images; the code reads raw file names and writes predictions only.
+\end{itemize}
+
+\section{Experiments and Ablation (placeholders)}
+The notebook contains the machinery to run experiments for different architectures and hyperparameters. When completing the report, run and record the following experiments and include their results here:
+\begin{enumerate}[noitemsep,topsep=0pt]
+    \item Baseline A: TinyResNet (lightweight) — report train/val accuracy and loss curves.
+    \item Baseline B: Simple CNN (you can implement a 3-layer conv-net) — report metrics.
+    \item Proposed: DenseNet-121 (from notebook) — report best validation accuracy and confusion matrix.
+    \item Ablation: test the effect of input size (e.g., 128 vs 224), data augmentation (with/without horizontal flip), and optimizer (Adam vs SGD).
+\end{enumerate}
+
+For each experiment report: training/validation curves, best checkpoint, per-class precision/recall where helpful, and a short analysis of failure cases (show sample misclassified images).
+
+\section{Reproducibility and Software}
+The entire pipeline exists in the provided Jupyter notebook and follows these steps: dataset loading → preprocessing/transforms → dataset split (80/20) → DataLoader creation → model definition → training loop with checkpointing → test-time prediction generation. Key files:
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item \texttt{Assignment\_3\_Template.ipynb} — full code used to run the experiments.
+    \item \texttt{report/CVPR\_report.tex} — this report skeleton.
+    \item \texttt{report/references.bib} — bibliography file.
+\end{itemize}
+
+Environment recommendations:
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item Python 3.8+ with PyTorch (1.11+), torchvision, PIL (Pillow), numpy, pandas, matplotlib, tqdm.
+    \item GPU with CUDA is recommended for training larger models; the notebook uses \texttt{device="cuda"} by default.
+\end{itemize}
+
+\section{How to run (quick)}
+From the repository root (where \texttt{train/} and \texttt{test/} folders are located) run the notebook or execute the training routine. A minimal sequence to train and produce predictions:
+
+\begin{verbatim}
+# Open and run `Assignment_3_Template.ipynb` in your environment or
+# import and call train_model(...) from a script after verifying device and paths
+# After training, produce predictions with the code in the Evaluation section and
+# write `prediction_labels.json` for submission.
+\end{verbatim}
+
+\section{Discussion}
+Summarize key findings, limitations and future work when experiments are complete. Consider the following talking points when finalizing the report:
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item Class imbalance and any strategies (sampling or weighted loss) used to mitigate it.
+    \item Effectiveness of data augmentation choices.
+    \item Model capacity vs overfitting (DenseNet-121 may overfit small classes; consider dropout, weight decay, or early stopping).
+    \item Potential improvements: learning-rate scheduling, mixup, additional regularization, or stronger augmentation.
+\end{itemize}
+
+\section*{Acknowledgements}
+Code structure and scaffolding were derived from the supplied notebook and standard PyTorch examples.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
